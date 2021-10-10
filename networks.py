@@ -27,7 +27,7 @@ class resnet_block(nn.Module):
 
 class generator(nn.Module):
     # initializers
-    def __init__(self, in_nc, out_nc, nf=32, nb=6):
+    def __init__(self, in_nc=3, out_nc=3, nf=32, nb=6):
         super(generator, self).__init__()
         self.input_nc = in_nc
         self.output_nc = out_nc
@@ -54,12 +54,14 @@ class generator(nn.Module):
         self.resnet_blocks = nn.Sequential(*self.resnet_blocks)
 
         self.up_convs = nn.Sequential(
-            nn.ConvTranspose2d(nf * 4, nf * 2, 3, 2, 1, 1), #k3n128s1/2
-            nn.Conv2d(nf * 2, nf * 2, 3, 1, 1), #k3n128s1
+            # nn.ConvTranspose2d(nf * 4, nf * 2, 3, 2, 1, 1), #k3n128s1/2
+            nn.Upsample(scale_factor=2, mode='bilinear'),
+            nn.Conv2d(nf * 4, nf * 2, 3, 1, 1), #k3n128s1
             nn.InstanceNorm2d(nf * 2),
             nn.ReLU(True),
-            nn.ConvTranspose2d(nf * 2, nf, 3, 2, 1, 1), #k3n64s1/2
-            nn.Conv2d(nf, nf, 3, 1, 1), #k3n64s1
+            # nn.ConvTranspose2d(nf * 2, nf, 3, 2, 1, 1), #k3n64s1/2
+            nn.Upsample(scale_factor=2, mode='bilinear'),
+            nn.Conv2d(nf * 2, nf, 3, 1, 1), #k3n64s1
             nn.InstanceNorm2d(nf),
             nn.ReLU(True),
             nn.Conv2d(nf, out_nc, 7, 1, 3), #k7n3s1
