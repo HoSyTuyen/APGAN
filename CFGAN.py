@@ -1,22 +1,27 @@
-import os, time, pickle, argparse, networks, utils
+import os, time, argparse, networks, utils
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
 from torchvision import transforms
-# from edge_promoting import edge_promoting
-import torch.nn.functional as F
-import os 
+import lpips
+
+
+from models.networks import define_HED
+
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--name', required=False, default='project_name',  help='')
-parser.add_argument('--batch_size', type=int, default=16, help='batch size')
-parser.add_argument('--con_lambda', type=float, default=100, help='lambda for content loss')
+parser.add_argument('--batch_size', type=int, default=8, help='batch size')
+parser.add_argument('--con_lambda', type=float, default=20, help='lambda for content loss')
 parser.add_argument('--tv_lambda', type=float, default=0, help='lambda for tv loss')
 parser.add_argument('--adv_lambda', type=float, default=1, help='lambda for advD loss')
+parser.add_argument('--hed_lambda', type=float, default=5, help='lambda for hed loss')
 
 parser.add_argument('--data_path', required=True, default='data/selfie2anime',  help='data path')
+parser.add_argument('--hed_path', default='checkpoints/network-bsds500.pytorch', help='hed pre-trained')
 
 parser.add_argument('--in_ngc', type=int, default=3, help='input channel for generator')
 parser.add_argument('--out_ngc', type=int, default=3, help='output channel for generator')
@@ -53,11 +58,14 @@ for k, v in sorted(vars(args).items()):
 print('Device: ', device)
 print('-------------- End ----------------')
 
-def total_variation_loss(img, weight):
-  bs_img, c_img, h_img, w_img = img.size()
-  tv_h = torch.pow(img[:,:,1:,:]-img[:,:,:-1,:], 2).sum()
-  tv_w = torch.pow(img[:,:,:,1:]-img[:,:,:,:-1], 2).sum()
-  return weight*(tv_h+tv_w)/(bs_img*c_img*h_img*w_img)
+
+def TV(x):
+  ell = torch.pow(torch.abs(x[:, :, 1:, :] - x[:, :, 0:-1, :]), 2).mean()
+  ell += torch.pow(torch.abs(x[:, :, :, 1:] - x[:, :, :, 0:-1]), 2).mean()
+  ell += torch.pow(torch.abs(x[:, :, 1:, 1:] - x[:, :, :-1, :-1]), 2).mean()
+  ell += torch.pow(torch.abs(x[:, :, 1:, :-1] - x[:, :, :-1, 1:]), 2).mean()
+  ell /= 4.
+  return ell
 
 
 # results save path
@@ -74,9 +82,9 @@ transform = transforms.Compose([
         transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
 ])
 
-trainA = utils.data_load(os.path.join('data', args.data_path), 'testA', transform, args.batch_size, shuffle=True, drop_last=True)
-trainB = utils.data_load(os.path.join('data', args.data_path), 'testB', transform, args.batch_size, shuffle=True, drop_last=True)
-testA = utils.data_load(os.path.join('data', args.data_path), 'testA', transform, 1, shuffle=True, drop_last=True)
+trainA = utils.data_load(args.data_path, 'trainA', transform, args.batch_size, shuffle=True, drop_last=True)
+trainB = utils.data_load(args.data_path, 'trainB', transform, args.batch_size, shuffle=True, drop_last=True)
+testA = utils.data_load(args.data_path, 'testA', transform, 1, shuffle=True, drop_last=True)
 
 
 # network
@@ -95,23 +103,23 @@ if args.latest_discriminator_model != '':
     D.load_state_dict(torch.load(args.latest_discriminator_model, map_location=lambda storage, loc: storage))
 
 RestNet18 = networks.RestNet18(init_weights=None)
+HED = define_HED(args.hed_path, [device])
+
 
 G.to(device)
 D.to(device)
-RestNet18.to(device)
+HED.to(device)
+# RestNet18.to(device)
+
 G.train()
 D.train()
-RestNet18.eval()
-
-# print('---------- Networks initialized -------------')
-# utils.print_network(G)
-# utils.print_network(D)
-# utils.print_network(RestNet18)
-# print('-----------------------------------------------')
+HED.eval()
+# RestNet18.eval()
 
 # loss
 BCE_loss = nn.BCELoss().to(device)
-L1_loss = nn.L1Loss().to(device)
+# L1_loss = nn.L1Loss().to(device)
+loss_fn_alex = lpips.LPIPS(net='alex').to(device)
 
 # Adam optimizer
 G_optimizer = optim.Adam(G.parameters(), lr=args.lrG, betas=(args.beta1, args.beta2))
@@ -129,6 +137,8 @@ for epoch in range(args.train_epoch):
   Recon_losses = []
   Disc_losses = []
   Gen_losses = []
+  TV_losses = []
+  HED_losses = []
 
   if epoch < args.pre_train_epoch:
     G.train()
@@ -138,8 +148,11 @@ for epoch in range(args.train_epoch):
       G_optimizer.zero_grad()
 
       G_ = G(x)
-      Recon_loss = args.con_lambda * L1_loss(G_, x)
-
+      # x_feature = RestNet18(x)
+      # G_feature = RestNet18(G_)
+      # Recon_loss = args.con_lambda * L1_loss(x_feature, G_feature)
+      # Recon_loss = args.con_lambda * L1_loss(x, G_)
+      Recon_loss = args.con_lambda * loss_fn_alex(x, G_).mean()
       Recon_losses.append(Recon_loss.item())
 
       Recon_loss.backward()
@@ -197,17 +210,40 @@ for epoch in range(args.train_epoch):
       G_fake_loss = BCE_loss(D_fake, real)*args.adv_lambda
       Gen_losses.append(G_fake_loss.item())
 
-      G_cons_loss = args.con_lambda * L1_loss(G_, x)
+      # x_feature = RestNet18(x)
+      # G_feature = RestNet18(G_)
+      # G_cons_loss = args.con_lambda * L1_loss(x_feature, G_feature)
+      # G_cons_loss = args.con_lambda * L1_loss(x, G_)
+      G_cons_loss = args.con_lambda * loss_fn_alex(x, G_).mean()
       Recon_losses.append(G_cons_loss.item())
 
-      Gen_loss = G_fake_loss + G_cons_loss
+      # G_ = G(x)
+      if args.tv_lambda > 0:
+        G_tv_loss = TV(G_) * args.tv_lambda
+        TV_losses.append(G_tv_loss.item())
+      else:
+        G_tv_loss = 0
+        TV_losses.append(G_tv_loss)
+
+      if args.hed_lambda > 0:
+        x_hed = (HED(x/2 + 0.5) - 0.5) * 2
+        G_hed = (HED(G_/2 + 0.5) - 0.5) * 2
+        G_hed_loss = args.hed_lambda * loss_fn_alex(x_hed, G_hed).mean()
+        HED_losses.append(G_hed_loss.item())
+      else:
+        G_hed_loss = 0
+        HED_losses.append(G_hed_loss)
+
+
+      Gen_loss = G_fake_loss + G_cons_loss + G_tv_loss + G_hed_loss
       
       Gen_loss.backward(retain_graph=True)
       G_optimizer.step()
     
     per_epoch_time = time.time() - epoch_start_time
-    print('[%d/%d] - time: %.2f, Disc loss: %.3f, Gen loss: %.3f, Con loss: %.3f' % ((epoch + 1), args.train_epoch, per_epoch_time, torch.mean(torch.FloatTensor(Disc_losses)), \
-        torch.mean(torch.FloatTensor(Gen_losses)), torch.mean(torch.FloatTensor(Recon_losses))))
+    print('[%d/%d] - time: %.2f, Disc loss: %.3f, Gen loss: %.3f, Con loss: %.3f, TV loss: %.3f, HED loss: %.3f' % ((epoch + 1), args.train_epoch, per_epoch_time, torch.mean(torch.FloatTensor(Disc_losses)), \
+        torch.mean(torch.FloatTensor(Gen_losses)), torch.mean(torch.FloatTensor(Recon_losses)), \
+        torch.mean(torch.FloatTensor(TV_losses)), torch.mean(torch.FloatTensor(HED_losses))))
 
     with torch.no_grad():
       G.eval()
