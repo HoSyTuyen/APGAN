@@ -1,15 +1,12 @@
 import os, time, argparse, networks, utils
 
 import torch
-import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
 from torchvision import transforms
-import lpips
 
-
-from models.networks import define_HED
-
+from networks import define_HED
+from loss import LPIPS_loss, BCE_loss
 
 
 parser = argparse.ArgumentParser()
@@ -58,21 +55,14 @@ for k, v in sorted(vars(args).items()):
 print('Device: ', device)
 print('-------------- End ----------------')
 
-
-def TV(x):
-  ell = torch.pow(torch.abs(x[:, :, 1:, :] - x[:, :, 0:-1, :]), 2).mean()
-  ell += torch.pow(torch.abs(x[:, :, :, 1:] - x[:, :, :, 0:-1]), 2).mean()
-  ell += torch.pow(torch.abs(x[:, :, 1:, 1:] - x[:, :, :-1, :-1]), 2).mean()
-  ell += torch.pow(torch.abs(x[:, :, 1:, :-1] - x[:, :, :-1, 1:]), 2).mean()
-  ell /= 4.
-  return ell
-
-
 # results save path
-if not os.path.isdir(os.path.join(args.name + '_results', 'Reconstruction')):
-  os.makedirs(os.path.join(args.name + '_results', 'Reconstruction'))
-if not os.path.isdir(os.path.join(args.name + '_results', 'Transfer')):
-  os.makedirs(os.path.join(args.name + '_results', 'Transfer'))
+if not os.path.isdir('result'):
+  os.makedirs('result')
+save_path = os.path.join('result', args.name)
+if not os.path.isdir(os.path.join(save_path + '_results', 'Reconstruction')):
+  os.makedirs(os.path.join(save_path + '_results', 'Reconstruction'))
+if not os.path.isdir(os.path.join(save_path + '_results', 'Transfer')):
+  os.makedirs(os.path.join(save_path + '_results', 'Transfer'))
 
 
 # data_loader
@@ -102,24 +92,19 @@ if args.latest_discriminator_model != '':
   else:
     D.load_state_dict(torch.load(args.latest_discriminator_model, map_location=lambda storage, loc: storage))
 
-RestNet18 = networks.RestNet18(init_weights=None)
 HED = define_HED(args.hed_path, [device])
-
 
 G.to(device)
 D.to(device)
 HED.to(device)
-# RestNet18.to(device)
 
 G.train()
 D.train()
 HED.eval()
-# RestNet18.eval()
 
 # loss
-BCE_loss = nn.BCELoss().to(device)
-# L1_loss = nn.L1Loss().to(device)
-loss_fn_alex = lpips.LPIPS(net='alex').to(device)
+BCE_loss = BCE_loss(device)
+loss_fn_alex = LPIPS_loss(device)
 
 # Adam optimizer
 G_optimizer = optim.Adam(G.parameters(), lr=args.lrG, betas=(args.beta1, args.beta2))
@@ -148,10 +133,6 @@ for epoch in range(args.train_epoch):
       G_optimizer.zero_grad()
 
       G_ = G(x)
-      # x_feature = RestNet18(x)
-      # G_feature = RestNet18(G_)
-      # Recon_loss = args.con_lambda * L1_loss(x_feature, G_feature)
-      # Recon_loss = args.con_lambda * L1_loss(x, G_)
       Recon_loss = args.con_lambda * loss_fn_alex(x, G_).mean()
       Recon_losses.append(Recon_loss.item())
 
@@ -163,12 +144,12 @@ for epoch in range(args.train_epoch):
 
     with torch.no_grad():
       G.eval()
-      torch.save(G.state_dict(), os.path.join(args.name + '_results', 'pretrained_generator.pkl'))
+      torch.save(G.state_dict(), os.path.join(save_path + '_results', 'pretrained_generator.pkl'))
       for n, (x, _) in enumerate(trainA):
         x = x.to(device)
         G_recon = G(x)
         result = torch.cat((x[0], G_recon[0]), 2)
-        path = os.path.join(args.name + '_results', 'Reconstruction', args.name + '_train_recon_' + str(n + 1) + '.png')
+        path = os.path.join(save_path + '_results', 'Reconstruction', args.name + '_train_recon_' + str(n + 1) + '.png')
         plt.imsave(path, (result.cpu().numpy().transpose(1, 2, 0) + 1) / 2)
         if n == 4:
           break
@@ -177,7 +158,7 @@ for epoch in range(args.train_epoch):
         x = x.to(device)
         G_recon = G(x)
         result = torch.cat((x[0], G_recon[0]), 2)
-        path = os.path.join(args.name + '_results', 'Reconstruction', args.name + '_test_recon_' + str(n + 1) + '.png')
+        path = os.path.join(save_path + '_results', 'Reconstruction', args.name + '_test_recon_' + str(n + 1) + '.png')
         plt.imsave(path, (result.cpu().numpy().transpose(1, 2, 0) + 1) / 2)
         if n == 4:
           break
@@ -210,14 +191,9 @@ for epoch in range(args.train_epoch):
       G_fake_loss = BCE_loss(D_fake, real)*args.adv_lambda
       Gen_losses.append(G_fake_loss.item())
 
-      # x_feature = RestNet18(x)
-      # G_feature = RestNet18(G_)
-      # G_cons_loss = args.con_lambda * L1_loss(x_feature, G_feature)
-      # G_cons_loss = args.con_lambda * L1_loss(x, G_)
       G_cons_loss = args.con_lambda * loss_fn_alex(x, G_).mean()
       Recon_losses.append(G_cons_loss.item())
 
-      # G_ = G(x)
       if args.tv_lambda > 0:
         G_tv_loss = TV(G_) * args.tv_lambda
         TV_losses.append(G_tv_loss.item())
@@ -252,7 +228,7 @@ for epoch in range(args.train_epoch):
 
         G_recon = G(x)
         result = torch.cat((x[0], G_recon[0]), 2)
-        path = os.path.join(args.name + '_results', 'Transfer', str(epoch+1) + '_epoch_' + args.name + '_train_' + str(n + 1) + '.png')
+        path = os.path.join(save_path + '_results', 'Transfer', str(epoch+1) + '_epoch_' + args.name + '_train_' + str(n + 1) + '.png')
         plt.imsave(path, (result.cpu().numpy().transpose(1, 2, 0) + 1) / 2)
         if n == 4:
           break
@@ -261,13 +237,13 @@ for epoch in range(args.train_epoch):
         x = x.to(device)
         G_recon = G(x)
         result = torch.cat((x[0], G_recon[0]), 2)
-        path = os.path.join(args.name + '_results', 'Transfer', str(epoch+1) + '_epoch_' + args.name + '_test_' + str(n + 1) + '.png')
+        path = os.path.join(save_path + '_results', 'Transfer', str(epoch+1) + '_epoch_' + args.name + '_test_' + str(n + 1) + '.png')
         plt.imsave(path, (result.cpu().numpy().transpose(1, 2, 0) + 1) / 2)
         if n == 4:
           break
 
-      torch.save(G.state_dict(), os.path.join(args.name + '_results', 'generator_latest.pkl'))
-      torch.save(D.state_dict(), os.path.join(args.name + '_results', 'discriminator_latest.pkl'))
+      torch.save(G.state_dict(), os.path.join(save_path + '_results', 'generator_latest.pkl'))
+      torch.save(D.state_dict(), os.path.join(save_path + '_results', 'discriminator_latest.pkl'))
 
   G_scheduler.step()
   D_scheduler.step()

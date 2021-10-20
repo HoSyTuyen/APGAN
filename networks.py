@@ -2,7 +2,6 @@ import torch
 import utils
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision
 
 class resnet_block(nn.Module):
     def __init__(self, channel, kernel, stride, padding):
@@ -132,71 +131,120 @@ class discriminator(nn.Module):
         return output
 
 
-class VGG19(nn.Module):
-    def __init__(self, init_weights=None, feature_mode=False, batch_norm=False, num_classes=1000):
-        super(VGG19, self).__init__()
-        self.cfg = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512, 'M', 512, 512, 512, 512, 'M']
-        self.init_weights = init_weights
-        self.feature_mode = feature_mode
-        self.batch_norm = batch_norm
-        self.num_clases = num_classes
-        self.features = self.make_layers(self.cfg, batch_norm)
-        self.classifier = nn.Sequential(
-            nn.Linear(512 * 7 * 7, 4096),
-            nn.ReLU(True),
-            nn.Dropout(),
-            nn.Linear(4096, 4096),
-            nn.ReLU(True),
-            nn.Dropout(),
-            nn.Linear(4096, num_classes),
+def define_HED(init_weights_, gpu_ids_=[]):
+    net = HED()
+
+    if len(gpu_ids_) > 0:
+        assert (torch.cuda.is_available())
+        net.to(gpu_ids_[0])
+        net = torch.nn.DataParallel(net, gpu_ids_)  # multi-GPUs
+
+    if not init_weights_ == None:
+        # device = torch.device('cuda:{}'.format(gpu_ids_[0])) if gpu_ids_ else torch.device('cpu')
+        print('Loading model from: %s' % init_weights_)
+        state_dict = torch.load(init_weights_, map_location='cuda')
+        if isinstance(net, torch.nn.DataParallel):
+            net.module.load_state_dict(state_dict)
+        else:
+            net.load_state_dict(state_dict)
+        print('load the weights successfully')
+
+    return net
+
+class HED(nn.Module):
+    def __init__(self):
+        super(HED, self).__init__()
+
+        self.moduleVggOne = nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=False),
+            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=False)
         )
-        if not init_weights == None:
-            self.load_state_dict(torch.load(init_weights))
 
-    def make_layers(self, cfg, batch_norm=False):
-        layers = []
-        in_channels = 3
-        for v in cfg:
-            if v == 'M':
-                layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
-            else:
-                conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
-                if batch_norm:
-                    layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
-                else:
-                    layers += [conv2d, nn.ReLU(inplace=True)]
-                in_channels = v
-        return nn.Sequential(*layers)
+        self.moduleVggTwo = nn.Sequential(
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=False),
+            nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=False)
+        )
 
-    def forward(self, x):
-        if self.feature_mode:
-            module_list = list(self.features.modules())
-            for l in module_list[1:27]:                 # conv4_4
-                x = l(x)
-        if not self.feature_mode:
-            x = x.view(x.size(0), -1)
-            x = self.classifier(x)
+        self.moduleVggThr = nn.Sequential(
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=False),
+            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=False),
+            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=False)
+        )
 
-        return x
+        self.moduleVggFou = nn.Sequential(
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(in_channels=256, out_channels=512, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=False),
+            nn.Conv2d(in_channels=512, out_channels=512, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=False),
+            nn.Conv2d(in_channels=512, out_channels=512, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=False)
+        )
 
+        self.moduleVggFiv = nn.Sequential(
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(in_channels=512, out_channels=512, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=False),
+            nn.Conv2d(in_channels=512, out_channels=512, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=False),
+            nn.Conv2d(in_channels=512, out_channels=512, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=False)
+        )
 
-class RestNet18(nn.Module):
-    def __init__(self, init_weights=None, num_classes=2):
-        super(RestNet18, self).__init__()
-        self.init_weights = init_weights
-        self.num_classes = num_classes
-        self.model = torchvision.models.resnet18(pretrained=True)
-        self.fc = torch.nn.Linear(25088, self.num_classes)
+        self.moduleScoreOne = nn.Conv2d(in_channels=64, out_channels=1, kernel_size=1, stride=1, padding=0)
+        self.moduleScoreTwo = nn.Conv2d(in_channels=128, out_channels=1, kernel_size=1, stride=1, padding=0)
+        self.moduleScoreThr = nn.Conv2d(in_channels=256, out_channels=1, kernel_size=1, stride=1, padding=0)
+        self.moduleScoreFou = nn.Conv2d(in_channels=512, out_channels=1, kernel_size=1, stride=1, padding=0)
+        self.moduleScoreFiv = nn.Conv2d(in_channels=512, out_channels=1, kernel_size=1, stride=1, padding=0)
 
-        if self.init_weights is not None:
-            print('Load Resnet18 pretrained')
-            self.model = torch.load(self.init_weights)
+        self.moduleCombine = nn.Sequential(
+            nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1, stride=1, padding=0),
+            nn.Sigmoid()
+        )
 
-        self.features = nn.Sequential(
-            *list(self.model.children())[:-3]
-            )
+    def forward(self, tensorInput):
+        tensorBlue = (tensorInput[:, 2:3, :, :] * 255.0) - 104.00698793
+        tensorGreen = (tensorInput[:, 1:2, :, :] * 255.0) - 116.66876762
+        tensorRed = (tensorInput[:, 0:1, :, :] * 255.0) - 122.67891434
 
-    def forward(self, x):
-        x = self.features(x)
+        tensorInput = torch.cat([tensorBlue, tensorGreen, tensorRed], 1)
 
-        return x
+        tensorVggOne = self.moduleVggOne(tensorInput)
+        tensorVggTwo = self.moduleVggTwo(tensorVggOne)
+        tensorVggThr = self.moduleVggThr(tensorVggTwo)
+        tensorVggFou = self.moduleVggFou(tensorVggThr)
+        tensorVggFiv = self.moduleVggFiv(tensorVggFou)
+
+        tensorScoreOne = self.moduleScoreOne(tensorVggOne)
+        tensorScoreTwo = self.moduleScoreTwo(tensorVggTwo)
+        tensorScoreThr = self.moduleScoreThr(tensorVggThr)
+        tensorScoreFou = self.moduleScoreFou(tensorVggFou)
+        tensorScoreFiv = self.moduleScoreFiv(tensorVggFiv)
+
+        tensorScoreOne = nn.functional.interpolate(input=tensorScoreOne,
+                                                   size=(tensorInput.size(2), tensorInput.size(3)), mode='bilinear',
+                                                   align_corners=False)
+        tensorScoreTwo = nn.functional.interpolate(input=tensorScoreTwo,
+                                                   size=(tensorInput.size(2), tensorInput.size(3)), mode='bilinear',
+                                                   align_corners=False)
+        tensorScoreThr = nn.functional.interpolate(input=tensorScoreThr,
+                                                   size=(tensorInput.size(2), tensorInput.size(3)), mode='bilinear',
+                                                   align_corners=False)
+        tensorScoreFou = nn.functional.interpolate(input=tensorScoreFou,
+                                                   size=(tensorInput.size(2), tensorInput.size(3)), mode='bilinear',
+                                                   align_corners=False)
+        tensorScoreFiv = nn.functional.interpolate(input=tensorScoreFiv,
+                                                   size=(tensorInput.size(2), tensorInput.size(3)), mode='bilinear',
+                                                   align_corners=False)
+
+        return self.moduleCombine(
+            torch.cat([tensorScoreOne, tensorScoreTwo, tensorScoreThr, tensorScoreFou, tensorScoreFiv], 1))
