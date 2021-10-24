@@ -1,4 +1,4 @@
-pip install scipy==1.1.0
+scipy==1.1.0
 pytorch >= 1.5
 matplotlib
 torchvision >= 0.5
