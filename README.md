@@ -7,6 +7,7 @@ matplotlib
 torchvision >= 0.5
 cv2
 PIL
+tqdm
 ```
 
 # 2. Set up
@@ -44,21 +45,25 @@ data
 ```
 You can train on your own data with the same structure
 
-#### 2.4 Download pretrain
-```angular2html
-mkdir checkpoint
-```
-Download the [pre-trained for HED](https://drive.google.com/file/d/1GBytgs63qzCUyPrvj8gQuR2EYdMXcpWP/view?usp=sharing) and put in `checkpoint` folder
-
-# 3. Usage
-#### 3.1. Test on pre-trained
+# 2. Test on pre-trained pretrain
+- Download [pre-trained weight](https://drive.google.com/file/d/1SCgxxN0u4lYLQgB_SwN2hLtBCAadzVC-/view?usp=sharing)
+- Run this command for testing
 ```angular2html
 python test.py --pre_trained_model "path_to_checkpoint.pkl" 
                --image_dir "path_to_input_folder" 
                --output_image_dir "path_to_output_folder"
 ```
 For other arguments, please find in `test.py`
-#### 3.2. Training
+
+
+
+# 3. Usage
+```angular2html
+mkdir checkpoint
+```
+Download the [pre-trained for HED](https://drive.google.com/file/d/1GBytgs63qzCUyPrvj8gQuR2EYdMXcpWP/view?usp=sharing) and put in `checkpoint` folder
+
+- Run this command for training
 ```angular2html
 python CFGAN.py --name "name_of_experiment"
                 --batch_size 8
