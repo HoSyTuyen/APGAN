@@ -1,4 +1,10 @@
+<<<<<<< HEAD
 pip install scipy==1.1.0
 pytorch >= 1.5
 matplotlib
 torchvision >= 0.5
+=======
+scipy==1.1.0
+pytorch == 1.8.0
+torchvision===0.5.0 -f https://download.pytorch.org/whl/torch_stable.html
+>>>>>>> a6ae2ccd68515c96b3df3302d61b7f9e5002f913
