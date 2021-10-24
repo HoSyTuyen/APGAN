@@ -24,7 +24,7 @@ if torch.backends.cudnn.enabled:
 
 G = networks.generator(args.in_ngc, args.out_ngc, args.ngf, args.nb)
 if torch.cuda.is_available():
-    G.load_state_dict(torch.load(args.pre_trained_model))
+    G.load_state_dict(torch.load(args.pre_trained_model), strict = False)
 else:
     # cpu mode
     G.load_state_dict(torch.load(args.pre_trained_model, map_location=lambda storage, loc: storage))
