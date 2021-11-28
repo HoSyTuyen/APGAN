@@ -45,19 +45,9 @@ data
 ```
 You can train on your own data with the same structure
 
-# 2. Test on pre-trained pretrain
-- Download [pre-trained weight](https://drive.google.com/file/d/1SCgxxN0u4lYLQgB_SwN2hLtBCAadzVC-/view?usp=sharing)
-- Run this command for testing
-```angular2html
-python test.py --pre_trained_model "path_to_checkpoint.pkl" 
-               --image_dir "path_to_input_folder" 
-               --output_image_dir "path_to_output_folder"
-```
-For other arguments, please find in `test.py`
 
 
-
-# 3. Usage
+# 2. Training
 ```angular2html
 mkdir checkpoint
 ```
@@ -73,3 +63,14 @@ python CFGAN.py --name "name_of_experiment"
                 --data_path "data/name_of_dataset"
 ```
 For other arguments, please find in `CFGAN.py`
+
+- After training you will attain a checkpoint in .pkl format
+
+# 2. Test
+- Run this command for testing
+```angular2html
+python test.py --pre_trained_model "path_to_checkpoint.pkl" 
+               --image_dir "path_to_input_folder" 
+               --output_image_dir "path_to_output_folder"
+```
+For other arguments, please find in `test.py`
